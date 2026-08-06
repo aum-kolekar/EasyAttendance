@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'screens/employee_list_screen.dart';
 import 'screens/mark_attendance_screen.dart';
+import 'screens/reports_screen.dart';
 
 void main() {
   runApp(const AttendanceApp());
@@ -75,9 +76,9 @@ class HomeScreen extends StatelessWidget {
               icon: Icons.receipt_long,
               label: 'Reports',
               onTap: () {
-                // We'll connect this in Stage 5
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Reports screen - coming in Stage 5')),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ReportsScreen()),
                 );
               },
             ),
