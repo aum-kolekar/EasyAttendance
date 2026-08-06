@@ -120,6 +120,17 @@ class DatabaseHelper {
     return maps.map((map) => Attendance.fromMap(map)).toList();
   }
 
+  // Removes a single attendance record for one employee on one date.
+  // Used to "un-mark" a Sunday extra-work day.
+  Future<void> deleteAttendanceForDate(int employeeId, String date) async {
+    final db = await database;
+    await db.delete(
+      'attendance',
+      where: 'employeeId = ? AND date = ?',
+      whereArgs: [employeeId, date],
+    );
+  }
+
   // Gets all attendance records for one employee within a date range
   // (used later in Stage 5 for salary calculation)
   Future<List<Attendance>> getAttendanceForEmployeeInRange(
