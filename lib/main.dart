@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/employee_list_screen.dart';
+import 'screens/mark_attendance_screen.dart';
 
 void main() {
   runApp(const AttendanceApp());
@@ -62,9 +63,9 @@ class HomeScreen extends StatelessWidget {
               icon: Icons.check_circle_outline,
               label: 'Mark Attendance',
               onTap: () {
-                // We'll connect this in Stage 4
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Attendance screen - coming in Stage 4')),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MarkAttendanceScreen()),
                 );
               },
             ),

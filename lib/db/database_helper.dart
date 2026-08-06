@@ -1,17 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/employee.dart';
+import '../models/attendance.dart';
 
-// This class is a "singleton" - only ONE instance of it exists for the
-// whole app. That's the standard pattern for a database connection.
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
   static Database? _database;
 
-  // Private constructor - nobody outside this class can create a new one.
   DatabaseHelper._internal();
 
-  // Gets the database, creating/opening it the first time it's needed.
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
@@ -19,19 +16,20 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    // getDatabasesPath() finds the correct local storage folder
-    // on the device automatically - no manual path config needed.
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'attendance_app.db');
 
     return await openDatabase(
       path,
-      version: 1,
+      // Bumped from 1 -> 2 because we're adding a new table.
+      // Flutter/sqflite uses this number to know when to run onUpgrade.
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
-  // Runs once, the very first time the app is installed - creates our table.
+  // Runs only on a brand-new install (no existing database).
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE employees(
@@ -40,24 +38,43 @@ class DatabaseHelper {
         monthlySalary REAL NOT NULL
       )
     ''');
+    await _createAttendanceTable(db);
   }
 
-  // --- CRUD operations ---
+  // Runs when an existing app is updated to a new database version.
+  // This preserves data already on the device (e.g. your employees from Stage 2).
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createAttendanceTable(db);
+    }
+  }
 
-  // CREATE: add a new employee, returns the new employee's id
+  Future<void> _createAttendanceTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE attendance(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        isPresent INTEGER NOT NULL,
+        FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE,
+        UNIQUE (employeeId, date)
+      )
+    ''');
+  }
+
+  // --- Employee CRUD (unchanged from Stage 2) ---
+
   Future<int> insertEmployee(Employee employee) async {
     final db = await database;
     return await db.insert('employees', employee.toMap()..remove('id'));
   }
 
-  // READ: get all employees, sorted alphabetically by name
   Future<List<Employee>> getAllEmployees() async {
     final db = await database;
     final maps = await db.query('employees', orderBy: 'name ASC');
     return maps.map((map) => Employee.fromMap(map)).toList();
   }
 
-  // READ: get a single employee by id (useful later for edit screens)
   Future<Employee?> getEmployee(int id) async {
     final db = await database;
     final maps = await db.query('employees', where: 'id = ?', whereArgs: [id]);
@@ -65,7 +82,6 @@ class DatabaseHelper {
     return Employee.fromMap(maps.first);
   }
 
-  // UPDATE: save changes to an existing employee (e.g. new salary)
   Future<int> updateEmployee(Employee employee) async {
     final db = await database;
     return await db.update(
@@ -76,9 +92,47 @@ class DatabaseHelper {
     );
   }
 
-  // DELETE: remove an employee
   Future<int> deleteEmployee(int id) async {
     final db = await database;
     return await db.delete('employees', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- Attendance operations ---
+
+  // Marks (or updates) attendance for one employee on one date.
+  // Uses INSERT OR REPLACE so tapping the same employee/date twice
+  // just overwrites the previous value instead of creating duplicates
+  // (the UNIQUE constraint above on employeeId+date makes this safe).
+  Future<void> markAttendance(Attendance attendance) async {
+    final db = await database;
+    await db.insert(
+      'attendance',
+      attendance.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Gets all attendance records for a specific date (used to show
+  // today's/selected date's present/absent state for every employee)
+  Future<List<Attendance>> getAttendanceForDate(String date) async {
+    final db = await database;
+    final maps = await db.query('attendance', where: 'date = ?', whereArgs: [date]);
+    return maps.map((map) => Attendance.fromMap(map)).toList();
+  }
+
+  // Gets all attendance records for one employee within a date range
+  // (used later in Stage 5 for salary calculation)
+  Future<List<Attendance>> getAttendanceForEmployeeInRange(
+    int employeeId,
+    String startDate,
+    String endDate,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'attendance',
+      where: 'employeeId = ? AND date >= ? AND date <= ?',
+      whereArgs: [employeeId, startDate, endDate],
+    );
+    return maps.map((map) => Attendance.fromMap(map)).toList();
   }
 }
