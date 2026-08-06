@@ -118,7 +118,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                       color: Colors.red),
                                   if (r.extraDaysWorked > 0) ...[
                                     _row('Extra Days Worked (Sundays)', '${r.extraDaysWorked}'),
-                                    _row('Bonus', '+ ₹${r.bonus.toStringAsFixed(2)}',
+                                    _row('Extra Pay', '+ ₹${r.bonus.toStringAsFixed(2)}',
                                         color: Colors.blue),
                                   ],
                                   const Divider(height: 20),
