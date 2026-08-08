@@ -29,7 +29,7 @@ class Bonus {
     return Bonus(
       id: map['id'] as int?,
       employeeId: map['employeeId'] as int,
-      amount: map['amount'] as double,
+      amount: (map['amount'] as num).toDouble(),
       date: map['date'] as String,
       note: map['note'] as String?,
     );

@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -34,7 +34,8 @@ class DatabaseHelper {
       CREATE TABLE employees(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        monthlySalary REAL NOT NULL
+        monthlySalary REAL NOT NULL,
+        joiningDate TEXT
       )
     ''');
 
@@ -102,6 +103,11 @@ class DatabaseHelper {
     }
     if (oldVersion < 5) {
       await _createBonusesTable(db);
+    }
+    if (oldVersion < 6) {
+      // Nullable column - existing employees simply have no joining date
+      // set, meaning "no pre-joining deduction applies" (unaffected).
+      await db.execute("ALTER TABLE employees ADD COLUMN joiningDate TEXT");
     }
   }
 

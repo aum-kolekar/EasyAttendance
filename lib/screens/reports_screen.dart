@@ -117,6 +117,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   _row('Days Absent', '${r.absentDays}'),
                                   _row('Attendance Deduction', '- ₹${r.deduction.toStringAsFixed(2)}',
                                       color: Colors.red),
+                                  if (r.preJoiningDays > 0) ...[
+                                    _row('Pre-Joining Days', '${r.preJoiningDays}'),
+                                    _row('Pre-Joining Deduction', '- ₹${r.preJoiningDeduction.toStringAsFixed(2)}',
+                                        color: Colors.red),
+                                  ],
                                   if (r.advanceDeducted > 0)
                                     _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}',
                                         color: Colors.orange),

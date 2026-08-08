@@ -9,8 +9,10 @@ class SalaryResult {
   final int workingDaysInMonth;
   final int absentDays;
   final int extraDaysWorked; // unused holiday quota - paid as bonus days
+  final int preJoiningDays; // days before joining date this month - not paid, not "absent"
   final double perDayRate;
   final double deduction;
+  final double preJoiningDeduction;
   final double advanceDeducted;
   final double manualBonusAdded;
   final double extraDayBonus;
@@ -24,8 +26,10 @@ class SalaryResult {
     required this.workingDaysInMonth,
     required this.absentDays,
     required this.extraDaysWorked,
+    required this.preJoiningDays,
     required this.perDayRate,
     required this.deduction,
+    required this.preJoiningDeduction,
     required this.advanceDeducted,
     required this.manualBonusAdded,
     required this.extraDayBonus,
@@ -36,6 +40,33 @@ class SalaryResult {
 class SalaryCalculator {
   // Fixed monthly holiday quota - any 4 days, no weekly restriction.
   static const int monthlyHolidayQuota = 4;
+
+  // How many days at the START of this month fall before the employee's
+  // joining date - these are excluded from pay but are NOT "absent" (the
+  // employee simply wasn't employed yet).
+  static int _calculatePreJoiningDays({
+    required String? joiningDate,
+    required int year,
+    required int month,
+    required int totalDays,
+  }) {
+    if (joiningDate == null) return 0;
+
+    final joined = DateTime.parse(joiningDate);
+    final monthStart = DateTime(year, month, 1);
+    final monthEnd = DateTime(year, month, totalDays);
+
+    if (!joined.isAfter(monthStart)) {
+      // Joined on or before the 1st of this month - fully employed all month
+      return 0;
+    }
+    if (joined.isAfter(monthEnd)) {
+      // Joining date is after this entire month - not employed at all yet
+      return totalDays;
+    }
+    // Joined partway through the month - days 1..(joiningDay - 1) unpaid
+    return joined.day - 1;
+  }
 
   static Future<SalaryResult> calculateForEmployee({
     required Employee employee,
@@ -66,6 +97,16 @@ class SalaryCalculator {
     final perDayRate = workingDays > 0 ? employee.monthlySalary / workingDays : 0.0;
     final deduction = perDayRate * absentDays;
 
+    // Days before joining this month - excluded from pay, kept separate
+    // from "absent" for clear reporting.
+    final preJoiningDays = _calculatePreJoiningDays(
+      joiningDate: employee.joiningDate,
+      year: year,
+      month: month,
+      totalDays: totalDays,
+    );
+    final preJoiningDeduction = perDayRate * preJoiningDays;
+
     // Any unused holiday quota (up to 4, enforced in the UI) becomes
     // extra pay - the employee worked days the salary already assumed
     // they'd take off.
@@ -87,8 +128,12 @@ class SalaryCalculator {
     );
     final bonusTotal = bonuses.fold<double>(0.0, (sum, b) => sum + b.amount);
 
-    final payable =
-        employee.monthlySalary - deduction - advanceTotal + bonusTotal + extraDayBonus;
+    final payable = employee.monthlySalary -
+        deduction -
+        preJoiningDeduction -
+        advanceTotal +
+        bonusTotal +
+        extraDayBonus;
 
     return SalaryResult(
       employee: employee,
@@ -98,12 +143,14 @@ class SalaryCalculator {
       workingDaysInMonth: workingDays,
       absentDays: absentDays,
       extraDaysWorked: extraDaysWorked,
+      preJoiningDays: preJoiningDays,
       perDayRate: perDayRate,
       deduction: deduction,
+      preJoiningDeduction: preJoiningDeduction,
       advanceDeducted: advanceTotal,
       manualBonusAdded: bonusTotal,
       extraDayBonus: extraDayBonus,
-      payableSalary: payable,
+      payableSalary: payable < 0 ? 0 : payable,
     );
   }
 
