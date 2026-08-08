@@ -94,6 +94,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         itemCount: _results.length,
                         itemBuilder: (context, index) {
                           final r = _results[index];
+                          final isMidMonthJoiner = r.preJoiningDays > 0;
+
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 6),
                             child: Padding(
@@ -110,18 +112,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   ),
                                   const SizedBox(height: 10),
                                   _row('Monthly Salary', '₹${r.employee.monthlySalary.toStringAsFixed(2)}'),
-                                  _row('Holiday Quota', '${r.holidayQuota}/month'),
+                                  _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)} (basis: ${r.workingDaysBasis} days)'),
+                                  if (isMidMonthJoiner)
+                                    _row('Days Employed This Month', '${r.employedDays} / ${r.totalDaysInMonth}'),
+                                  _row('Holiday Quota', isMidMonthJoiner
+                                      ? '${r.holidayQuotaProrated} (prorated)'
+                                      : '${r.holidayQuota}/month'),
                                   _row('Holidays Taken', '${r.holidayDays}'),
-                                  _row('Working Days (basis)', '${r.workingDaysInMonth}'),
-                                  _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)}'),
+                                  _row('Base Pay', '₹${r.basePay.toStringAsFixed(2)}'),
                                   _row('Days Absent', '${r.absentDays}'),
                                   _row('Attendance Deduction', '- ₹${r.deduction.toStringAsFixed(2)}',
                                       color: Colors.red),
-                                  if (r.preJoiningDays > 0) ...[
-                                    _row('Pre-Joining Days', '${r.preJoiningDays}'),
-                                    _row('Pre-Joining Deduction', '- ₹${r.preJoiningDeduction.toStringAsFixed(2)}',
-                                        color: Colors.red),
-                                  ],
                                   if (r.advanceDeducted > 0)
                                     _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}',
                                         color: Colors.orange),
@@ -148,19 +149,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  // Fixed to prevent the overflow error: label is Expanded (wraps/shrinks
+  // as needed) and value is Flexible with right-aligned text, so long
+  // strings never push past the edge of the card.
   Widget _row(String label, String value, {bool bold = false, Color? color, double fontSize = 15}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: fontSize,
-              fontWeight: bold ? FontWeight.bold : FontWeight.w500,
-              color: color,
+          Expanded(
+            child: Text(label, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: bold ? FontWeight.bold : FontWeight.w500,
+                color: color,
+              ),
             ),
           ),
         ],

@@ -4,15 +4,17 @@ import '../db/database_helper.dart';
 class SalaryResult {
   final Employee employee;
   final int totalDaysInMonth;
-  final int holidayQuota; // fixed monthly quota (4)
+  final int holidayQuota; // fixed monthly quota (4), for a fully employed month
+  final int holidayQuotaProrated; // quota actually earned this month, scaled by days employed
   final int holidayDays; // actual holidays the employee took
-  final int workingDaysInMonth;
+  final int workingDaysBasis; // totalDays - 4, used purely to derive perDayRate
+  final int employedDays; // days this month the employee was actually employed
+  final int preJoiningDays;
   final int absentDays;
-  final int extraDaysWorked; // unused holiday quota - paid as bonus days
-  final int preJoiningDays; // days before joining date this month - not paid, not "absent"
+  final int extraDaysWorked;
   final double perDayRate;
+  final double basePay; // perDayRate * (employedDays - holidayQuotaProrated)
   final double deduction;
-  final double preJoiningDeduction;
   final double advanceDeducted;
   final double manualBonusAdded;
   final double extraDayBonus;
@@ -22,14 +24,16 @@ class SalaryResult {
     required this.employee,
     required this.totalDaysInMonth,
     required this.holidayQuota,
+    required this.holidayQuotaProrated,
     required this.holidayDays,
-    required this.workingDaysInMonth,
+    required this.workingDaysBasis,
+    required this.employedDays,
+    required this.preJoiningDays,
     required this.absentDays,
     required this.extraDaysWorked,
-    required this.preJoiningDays,
     required this.perDayRate,
+    required this.basePay,
     required this.deduction,
-    required this.preJoiningDeduction,
     required this.advanceDeducted,
     required this.manualBonusAdded,
     required this.extraDayBonus,
@@ -38,12 +42,8 @@ class SalaryResult {
 }
 
 class SalaryCalculator {
-  // Fixed monthly holiday quota - any 4 days, no weekly restriction.
   static const int monthlyHolidayQuota = 4;
 
-  // How many days at the START of this month fall before the employee's
-  // joining date - these are excluded from pay but are NOT "absent" (the
-  // employee simply wasn't employed yet).
   static int _calculatePreJoiningDays({
     required String? joiningDate,
     required int year,
@@ -56,15 +56,8 @@ class SalaryCalculator {
     final monthStart = DateTime(year, month, 1);
     final monthEnd = DateTime(year, month, totalDays);
 
-    if (!joined.isAfter(monthStart)) {
-      // Joined on or before the 1st of this month - fully employed all month
-      return 0;
-    }
-    if (joined.isAfter(monthEnd)) {
-      // Joining date is after this entire month - not employed at all yet
-      return totalDays;
-    }
-    // Joined partway through the month - days 1..(joiningDay - 1) unpaid
+    if (!joined.isAfter(monthStart)) return 0;
+    if (joined.isAfter(monthEnd)) return totalDays;
     return joined.day - 1;
   }
 
@@ -91,27 +84,34 @@ class SalaryCalculator {
       if (record.isHoliday) holidayDays++;
     }
 
-    // Salary always assumes a fixed monthly quota of off-days (4),
-    // regardless of how many the employee actually took.
-    final workingDays = totalDays - monthlyHolidayQuota;
-    final perDayRate = workingDays > 0 ? employee.monthlySalary / workingDays : 0.0;
-    final deduction = perDayRate * absentDays;
+    // Per-day rate is always derived from a fully-employed month's
+    // structure (total days minus the standard 4-day quota) - this is
+    // a fixed rate, the same 26/27 days regardless of when someone joined.
+    final workingDaysBasis = totalDays - monthlyHolidayQuota;
+    final perDayRate =
+        workingDaysBasis > 0 ? employee.monthlySalary / workingDaysBasis : 0.0;
 
-    // Days before joining this month - excluded from pay, kept separate
-    // from "absent" for clear reporting.
     final preJoiningDays = _calculatePreJoiningDays(
       joiningDate: employee.joiningDate,
       year: year,
       month: month,
       totalDays: totalDays,
     );
-    final preJoiningDeduction = perDayRate * preJoiningDays;
+    final employedDays = totalDays - preJoiningDays;
 
-    // Any unused holiday quota (up to 4, enforced in the UI) becomes
-    // extra pay - the employee worked days the salary already assumed
-    // they'd take off.
+    // Holiday quota scaled to how much of the month was actually worked.
+    final holidayQuotaProrated = (monthlyHolidayQuota * employedDays) ~/ totalDays;
+
+    // The actual base pay owed: per-day rate times the days the employee
+    // was both employed AND expected to work (i.e. excluding their
+    // prorated holiday allowance). For a fully-employed month this comes
+    // out exactly equal to the monthly salary, as expected.
+    final basePay = perDayRate * (employedDays - holidayQuotaProrated);
+
+    final deduction = perDayRate * absentDays;
+
     final extraDaysWorked =
-        (monthlyHolidayQuota - holidayDays).clamp(0, monthlyHolidayQuota);
+        (holidayQuotaProrated - holidayDays).clamp(0, holidayQuotaProrated);
     final extraDayBonus = perDayRate * extraDaysWorked;
 
     final advances = await DatabaseHelper.instance.getAdvancesForEmployeeInRange(
@@ -128,25 +128,22 @@ class SalaryCalculator {
     );
     final bonusTotal = bonuses.fold<double>(0.0, (sum, b) => sum + b.amount);
 
-    final payable = employee.monthlySalary -
-        deduction -
-        preJoiningDeduction -
-        advanceTotal +
-        bonusTotal +
-        extraDayBonus;
+    final payable = basePay - deduction - advanceTotal + bonusTotal + extraDayBonus;
 
     return SalaryResult(
       employee: employee,
       totalDaysInMonth: totalDays,
       holidayQuota: monthlyHolidayQuota,
+      holidayQuotaProrated: holidayQuotaProrated,
       holidayDays: holidayDays,
-      workingDaysInMonth: workingDays,
+      workingDaysBasis: workingDaysBasis,
+      employedDays: employedDays,
+      preJoiningDays: preJoiningDays,
       absentDays: absentDays,
       extraDaysWorked: extraDaysWorked,
-      preJoiningDays: preJoiningDays,
       perDayRate: perDayRate,
+      basePay: basePay,
       deduction: deduction,
-      preJoiningDeduction: preJoiningDeduction,
       advanceDeducted: advanceTotal,
       manualBonusAdded: bonusTotal,
       extraDayBonus: extraDayBonus,
