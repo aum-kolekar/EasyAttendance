@@ -110,7 +110,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   ),
                                   const SizedBox(height: 10),
                                   _row('Monthly Salary', '₹${r.employee.monthlySalary.toStringAsFixed(2)}'),
-                                  _row('Holiday Quota', '${r.expectedHolidays} (1/week)'),
+                                  _row('Holiday Quota', '${r.holidayQuota}/month'),
                                   _row('Holidays Taken', '${r.holidayDays}'),
                                   _row('Working Days (basis)', '${r.workingDaysInMonth}'),
                                   _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)}'),
@@ -121,7 +121,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                     _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}',
                                         color: Colors.orange),
                                   if (r.extraDaysWorked > 0)
-                                    _row('Extra Days Worked (no holiday taken)', '${r.extraDaysWorked}'),
+                                    _row('Extra Days Worked (unused holidays)', '${r.extraDaysWorked}'),
                                   if (r.extraDayBonus > 0)
                                     _row('Extra Day Bonus', '+ ₹${r.extraDayBonus.toStringAsFixed(2)}',
                                         color: Colors.green),

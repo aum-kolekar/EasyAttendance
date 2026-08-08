@@ -11,12 +11,14 @@ class MarkAttendanceScreen extends StatefulWidget {
 }
 
 class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
+  static const int monthlyHolidayQuota = 4;
+
   DateTime _selectedDate = DateTime.now();
   List<Employee> _employees = [];
   Map<int, String> _attendanceStatus = {};
-  // Tracks, per employee, whether they've already used their one holiday
-  // for the week containing _selectedDate (on a DIFFERENT day than today)
-  Map<int, bool> _holidayUsedElsewhereThisWeek = {};
+  // Tracks, per employee, how many holidays they've already used THIS
+  // MONTH on days other than the currently selected one.
+  Map<int, int> _holidaysUsedElsewhereThisMonth = {};
   bool _isLoading = true;
 
   @override
@@ -27,14 +29,6 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
 
   String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
-
-  // Monday..Sunday range containing the given date.
-  // DateTime.weekday: Monday = 1 ... Sunday = 7
-  ({DateTime start, DateTime end}) _weekRangeFor(DateTime date) {
-    final start = date.subtract(Duration(days: date.weekday - 1));
-    final end = start.add(const Duration(days: 6));
-    return (start: start, end: end);
   }
 
   Future<void> _loadData() async {
@@ -49,29 +43,31 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
       statusMap[record.employeeId] = record.status;
     }
 
-    // For each employee, check if they've already used a Holiday this
-    // week on a day OTHER than the currently selected one.
-    final week = _weekRangeFor(_selectedDate);
-    final weekStartStr = _formatDate(week.start);
-    final weekEndStr = _formatDate(week.end);
+    // For each employee, count how many holidays they've used THIS MONTH,
+    // excluding the currently selected date (so re-tapping the same day
+    // doesn't count itself twice).
+    final totalDaysInMonth = DateTime(_selectedDate.year, _selectedDate.month + 1, 0).day;
+    final monthStartStr = _formatDate(DateTime(_selectedDate.year, _selectedDate.month, 1));
+    final monthEndStr =
+        _formatDate(DateTime(_selectedDate.year, _selectedDate.month, totalDaysInMonth));
 
-    final holidayUsedMap = <int, bool>{};
+    final holidayCountMap = <int, int>{};
     for (final employee in employees) {
-      final weekRecords = await DatabaseHelper.instance.getAttendanceForEmployeeInRange(
+      final monthRecords = await DatabaseHelper.instance.getAttendanceForEmployeeInRange(
         employee.id!,
-        weekStartStr,
-        weekEndStr,
+        monthStartStr,
+        monthEndStr,
       );
-      final usedElsewhere = weekRecords.any(
+      final usedElsewhere = monthRecords.where(
         (r) => r.isHoliday && r.date != dateStr,
-      );
-      holidayUsedMap[employee.id!] = usedElsewhere;
+      ).length;
+      holidayCountMap[employee.id!] = usedElsewhere;
     }
 
     setState(() {
       _employees = employees;
       _attendanceStatus = statusMap;
-      _holidayUsedElsewhereThisWeek = holidayUsedMap;
+      _holidaysUsedElsewhereThisMonth = holidayCountMap;
       _isLoading = false;
     });
   }
@@ -97,6 +93,10 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
     setState(() {
       _attendanceStatus[employeeId] = status;
     });
+    // Holiday counts may need to re-sync if this changes totals, but since
+    // we only track "used elsewhere" (not today), a quick reload keeps
+    // everything consistent without extra bookkeeping.
+    _loadData();
   }
 
   @override
@@ -151,6 +151,9 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
                         itemBuilder: (context, index) {
                           final employee = _employees[index];
                           final status = _attendanceStatus[employee.id];
+                          final usedElsewhere =
+                              _holidaysUsedElsewhereThisMonth[employee.id] ?? 0;
+                          final quotaReached = usedElsewhere >= monthlyHolidayQuota;
 
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 6),
@@ -195,21 +198,23 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
                                           label: 'Holiday',
                                           color: Colors.blue,
                                           isSelected: status == 'holiday',
-                                          onTap: (_holidayUsedElsewhereThisWeek[employee.id] ?? false)
+                                          onTap: quotaReached
                                               ? null
                                               : () => _setStatus(employee.id!, 'holiday'),
                                         ),
                                       ),
                                     ],
                                   ),
-                                  if ((_holidayUsedElsewhereThisWeek[employee.id] ?? false))
-                                    const Padding(
-                                      padding: EdgeInsets.only(top: 6),
-                                      child: Text(
-                                        'Holiday already used this week',
-                                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                                      ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    quotaReached
+                                        ? 'Holiday quota used ($usedElsewhere/$monthlyHolidayQuota this month)'
+                                        : 'Holidays used this month: $usedElsewhere/$monthlyHolidayQuota',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: quotaReached ? Colors.red.shade400 : Colors.grey,
                                     ),
+                                  ),
                                 ],
                               ),
                             ),

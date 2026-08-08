@@ -4,11 +4,11 @@ import '../db/database_helper.dart';
 class SalaryResult {
   final Employee employee;
   final int totalDaysInMonth;
-  final int expectedHolidays; // number of complete weeks in the month
+  final int holidayQuota; // fixed monthly quota (4)
   final int holidayDays; // actual holidays the employee took
   final int workingDaysInMonth;
   final int absentDays;
-  final int extraDaysWorked; // complete weeks with no holiday taken + full attendance
+  final int extraDaysWorked; // unused holiday quota - paid as bonus days
   final double perDayRate;
   final double deduction;
   final double advanceDeducted;
@@ -19,7 +19,7 @@ class SalaryResult {
   SalaryResult({
     required this.employee,
     required this.totalDaysInMonth,
-    required this.expectedHolidays,
+    required this.holidayQuota,
     required this.holidayDays,
     required this.workingDaysInMonth,
     required this.absentDays,
@@ -34,28 +34,8 @@ class SalaryResult {
 }
 
 class SalaryCalculator {
-  static String _fmt(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  // Finds every Monday..Sunday week that is FULLY contained within this
-  // month (both the Monday and the following Sunday fall inside it).
-  // This is what defines the "expected holidays" quota - normally 4,
-  // sometimes 3 depending on how the month lines up with the calendar.
-  static List<({DateTime start, DateTime end})> _completeWeeksInMonth(int year, int month) {
-    final totalDays = DateTime(year, month + 1, 0).day;
-    final weeks = <({DateTime start, DateTime end})>[];
-
-    for (int day = 1; day <= totalDays; day++) {
-      final date = DateTime(year, month, day);
-      if (date.weekday == DateTime.monday) {
-        final weekEnd = date.add(const Duration(days: 6));
-        if (weekEnd.month == month && weekEnd.year == year) {
-          weeks.add((start: date, end: weekEnd));
-        }
-      }
-    }
-    return weeks;
-  }
+  // Fixed monthly holiday quota - any 4 days, no weekly restriction.
+  static const int monthlyHolidayQuota = 4;
 
   static Future<SalaryResult> calculateForEmployee({
     required Employee employee,
@@ -80,39 +60,19 @@ class SalaryCalculator {
       if (record.isHoliday) holidayDays++;
     }
 
-    // The month's quota of expected off-days, based purely on the calendar
-    // (how many complete Mon-Sun weeks fit inside it) - NOT on what the
-    // employee actually did. This is the fixed baseline the salary assumes.
-    final completeWeeks = _completeWeeksInMonth(year, month);
-    final expectedHolidays = completeWeeks.length;
-
-    final workingDays = totalDays - expectedHolidays;
+    // Salary always assumes a fixed monthly quota of off-days (4),
+    // regardless of how many the employee actually took.
+    final workingDays = totalDays - monthlyHolidayQuota;
     final perDayRate = workingDays > 0 ? employee.monthlySalary / workingDays : 0.0;
     final deduction = perDayRate * absentDays;
 
-    // For each complete week: if the employee took NO holiday that week
-    // AND was marked Present on all 7 days, that's a day beyond what the
-    // salary already covers - pay one extra day's rate for it.
-    int extraDaysWorked = 0;
-    for (final week in completeWeeks) {
-      final weekRecords = records.where(
-        (r) {
-          final d = DateTime.parse(r.date);
-          return !d.isBefore(week.start) && !d.isAfter(week.end);
-        },
-      ).toList();
-
-      final tookHolidayThisWeek = weekRecords.any((r) => r.isHoliday);
-      final presentCount = weekRecords.where((r) => r.isPresent).length;
-      final fullyPresentAllWeek = presentCount == 7;
-
-      if (!tookHolidayThisWeek && fullyPresentAllWeek) {
-        extraDaysWorked++;
-      }
-    }
+    // Any unused holiday quota (up to 4, enforced in the UI) becomes
+    // extra pay - the employee worked days the salary already assumed
+    // they'd take off.
+    final extraDaysWorked =
+        (monthlyHolidayQuota - holidayDays).clamp(0, monthlyHolidayQuota);
     final extraDayBonus = perDayRate * extraDaysWorked;
 
-    // Manual advances and bonuses (from the Advance/Bonus screens)
     final advances = await DatabaseHelper.instance.getAdvancesForEmployeeInRange(
       employee.id!,
       startDate,
@@ -133,7 +93,7 @@ class SalaryCalculator {
     return SalaryResult(
       employee: employee,
       totalDaysInMonth: totalDays,
-      expectedHolidays: expectedHolidays,
+      holidayQuota: monthlyHolidayQuota,
       holidayDays: holidayDays,
       workingDaysInMonth: workingDays,
       absentDays: absentDays,
