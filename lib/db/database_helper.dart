@@ -2,6 +2,8 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/employee.dart';
 import '../models/attendance.dart';
+import '../models/advance.dart';
+import '../models/bonus.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -21,15 +23,12 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      // Bumped from 1 -> 2 because we're adding a new table.
-      // Flutter/sqflite uses this number to know when to run onUpgrade.
-      version: 2,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
   }
 
-  // Runs only on a brand-new install (no existing database).
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE employees(
@@ -38,31 +37,101 @@ class DatabaseHelper {
         monthlySalary REAL NOT NULL
       )
     ''');
-    await _createAttendanceTable(db);
-  }
 
-  // Runs when an existing app is updated to a new database version.
-  // This preserves data already on the device (e.g. your employees from Stage 2).
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await _createAttendanceTable(db);
-    }
-  }
-
-  Future<void> _createAttendanceTable(Database db) async {
     await db.execute('''
       CREATE TABLE attendance(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         employeeId INTEGER NOT NULL,
         date TEXT NOT NULL,
-        isPresent INTEGER NOT NULL,
+        status TEXT NOT NULL,
         FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE,
         UNIQUE (employeeId, date)
       )
     ''');
+
+    await _createAdvancesTable(db);
+    await _createBonusesTable(db);
   }
 
-  // --- Employee CRUD (unchanged from Stage 2) ---
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS attendance(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employeeId INTEGER NOT NULL,
+          date TEXT NOT NULL,
+          isPresent INTEGER NOT NULL,
+          FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE,
+          UNIQUE (employeeId, date)
+        )
+      ''');
+    }
+    if (oldVersion < 3) {
+      // Add the new 'status' column and translate old true/false data
+      // into it. The old 'isPresent' column is left in place unused -
+      // harmless, and safer than trying to drop a column in SQLite.
+      await db.execute("ALTER TABLE attendance ADD COLUMN status TEXT");
+      await db.execute('''
+        UPDATE attendance
+        SET status = CASE WHEN isPresent = 1 THEN 'present' ELSE 'absent' END
+        WHERE status IS NULL
+      ''');
+      await _createAdvancesTable(db);
+    }
+    if (oldVersion < 4) {
+      // Fix: the old 'isPresent' column is still NOT NULL, but our new
+      // code never sets it - every save was silently failing. Rebuild
+      // the table cleanly with only the columns we actually use now.
+      await db.execute('''
+        CREATE TABLE attendance_new(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employeeId INTEGER NOT NULL,
+          date TEXT NOT NULL,
+          status TEXT NOT NULL,
+          FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE,
+          UNIQUE (employeeId, date)
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO attendance_new (id, employeeId, date, status)
+        SELECT id, employeeId, date, status FROM attendance
+        WHERE status IS NOT NULL
+      ''');
+      await db.execute('DROP TABLE attendance');
+      await db.execute('ALTER TABLE attendance_new RENAME TO attendance');
+    }
+    if (oldVersion < 5) {
+      await _createBonusesTable(db);
+    }
+  }
+
+  Future<void> _createAdvancesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS advances(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT,
+        FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createBonusesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS bonuses(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT,
+        FOREIGN KEY (employeeId) REFERENCES employees (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  // --- Employee CRUD (unchanged) ---
 
   Future<int> insertEmployee(Employee employee) async {
     final db = await database;
@@ -97,42 +166,27 @@ class DatabaseHelper {
     return await db.delete('employees', where: 'id = ?', whereArgs: [id]);
   }
 
-  // --- Attendance operations ---
+  // --- Attendance (status-based: present / absent / holiday) ---
 
-  // Marks (or updates) attendance for one employee on one date.
-  // Uses INSERT OR REPLACE so tapping the same employee/date twice
-  // just overwrites the previous value instead of creating duplicates
-  // (the UNIQUE constraint above on employeeId+date makes this safe).
   Future<void> markAttendance(Attendance attendance) async {
     final db = await database;
     await db.insert(
       'attendance',
-      attendance.toMap()..remove('id'),
+      {
+        'employeeId': attendance.employeeId,
+        'date': attendance.date,
+        'status': attendance.status,
+      },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
-  // Gets all attendance records for a specific date (used to show
-  // today's/selected date's present/absent state for every employee)
   Future<List<Attendance>> getAttendanceForDate(String date) async {
     final db = await database;
     final maps = await db.query('attendance', where: 'date = ?', whereArgs: [date]);
     return maps.map((map) => Attendance.fromMap(map)).toList();
   }
 
-  // Removes a single attendance record for one employee on one date.
-  // Used to "un-mark" a Sunday extra-work day.
-  Future<void> deleteAttendanceForDate(int employeeId, String date) async {
-    final db = await database;
-    await db.delete(
-      'attendance',
-      where: 'employeeId = ? AND date = ?',
-      whereArgs: [employeeId, date],
-    );
-  }
-
-  // Gets all attendance records for one employee within a date range
-  // (used later in Stage 5 for salary calculation)
   Future<List<Attendance>> getAttendanceForEmployeeInRange(
     int employeeId,
     String startDate,
@@ -145,5 +199,59 @@ class DatabaseHelper {
       whereArgs: [employeeId, startDate, endDate],
     );
     return maps.map((map) => Attendance.fromMap(map)).toList();
+  }
+
+  // --- Advances ---
+
+  Future<int> insertAdvance(Advance advance) async {
+    final db = await database;
+    return await db.insert('advances', advance.toMap()..remove('id'));
+  }
+
+  Future<List<Advance>> getAdvancesForEmployeeInRange(
+    int employeeId,
+    String startDate,
+    String endDate,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'advances',
+      where: 'employeeId = ? AND date >= ? AND date <= ?',
+      whereArgs: [employeeId, startDate, endDate],
+      orderBy: 'date DESC',
+    );
+    return maps.map((map) => Advance.fromMap(map)).toList();
+  }
+
+  Future<int> deleteAdvance(int id) async {
+    final db = await database;
+    return await db.delete('advances', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- Bonuses ---
+
+  Future<int> insertBonus(Bonus bonus) async {
+    final db = await database;
+    return await db.insert('bonuses', bonus.toMap()..remove('id'));
+  }
+
+  Future<List<Bonus>> getBonusesForEmployeeInRange(
+    int employeeId,
+    String startDate,
+    String endDate,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'bonuses',
+      where: 'employeeId = ? AND date >= ? AND date <= ?',
+      whereArgs: [employeeId, startDate, endDate],
+      orderBy: 'date DESC',
+    );
+    return maps.map((map) => Bonus.fromMap(map)).toList();
+  }
+
+  Future<int> deleteBonus(int id) async {
+    final db = await database;
+    return await db.delete('bonuses', where: 'id = ?', whereArgs: [id]);
   }
 }

@@ -53,7 +53,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ),
       body: Column(
         children: [
-          // Month selector bar
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -111,16 +110,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   ),
                                   const SizedBox(height: 10),
                                   _row('Monthly Salary', '₹${r.employee.monthlySalary.toStringAsFixed(2)}'),
-                                  _row('Working Days (excl. Sundays)', '${r.workingDaysInMonth}'),
+                                  _row('Holiday Quota', '${r.expectedHolidays} (1/week)'),
+                                  _row('Holidays Taken', '${r.holidayDays}'),
+                                  _row('Working Days (basis)', '${r.workingDaysInMonth}'),
                                   _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)}'),
                                   _row('Days Absent', '${r.absentDays}'),
-                                  _row('Deduction', '- ₹${r.deduction.toStringAsFixed(2)}',
+                                  _row('Attendance Deduction', '- ₹${r.deduction.toStringAsFixed(2)}',
                                       color: Colors.red),
-                                  if (r.extraDaysWorked > 0) ...[
-                                    _row('Extra Days Worked (Sundays)', '${r.extraDaysWorked}'),
-                                    _row('Extra Pay', '+ ₹${r.bonus.toStringAsFixed(2)}',
-                                        color: Colors.blue),
-                                  ],
+                                  if (r.advanceDeducted > 0)
+                                    _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}',
+                                        color: Colors.orange),
+                                  if (r.extraDaysWorked > 0)
+                                    _row('Extra Days Worked (no holiday taken)', '${r.extraDaysWorked}'),
+                                  if (r.extraDayBonus > 0)
+                                    _row('Extra Day Bonus', '+ ₹${r.extraDayBonus.toStringAsFixed(2)}',
+                                        color: Colors.green),
+                                  if (r.manualBonusAdded > 0)
+                                    _row('Bonus Added', '+ ₹${r.manualBonusAdded.toStringAsFixed(2)}',
+                                        color: Colors.green),
                                   const Divider(height: 20),
                                   _row('Payable Salary', '₹${r.payableSalary.toStringAsFixed(2)}',
                                       bold: true, color: Colors.green.shade700, fontSize: 18),

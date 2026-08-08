@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../models/employee.dart';
 import 'add_edit_employee_screen.dart';
+import 'employee_detail_screen.dart';
 
 class EmployeeListScreen extends StatefulWidget {
   const EmployeeListScreen({super.key});
@@ -20,7 +21,6 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
     _loadEmployees();
   }
 
-  // Fetches the current employee list from the database and refreshes the UI
   Future<void> _loadEmployees() async {
     setState(() => _isLoading = true);
     final employees = await DatabaseHelper.instance.getAllEmployees();
@@ -74,16 +74,16 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                           style: const TextStyle(fontSize: 15),
                         ),
                         trailing: const Icon(Icons.chevron_right),
+                        // Tapping an employee now opens a detail screen with
+                        // three clear options: Advance, Bonus, Edit.
                         onTap: () async {
-                          // Tapping an employee opens the edit screen
                           await Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) =>
-                                  AddEditEmployeeScreen(employee: employee),
+                              builder: (_) => EmployeeDetailScreen(employee: employee),
                             ),
                           );
-                          _loadEmployees(); // refresh list after returning
+                          _loadEmployees(); // refresh in case salary was edited
                         },
                       ),
                     );
@@ -91,12 +91,11 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                 ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          // Opens the Add screen (no employee passed = "add" mode)
           await Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const AddEditEmployeeScreen()),
           );
-          _loadEmployees(); // refresh list after returning
+          _loadEmployees();
         },
         icon: const Icon(Icons.add),
         label: const Text('Add Employee'),
