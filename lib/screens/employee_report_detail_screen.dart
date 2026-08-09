@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../models/employee.dart';
+import '../models/attendance.dart';
 import '../models/advance.dart';
 import '../models/bonus.dart';
 import '../services/salary_calculator.dart';
@@ -153,6 +154,114 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
     }
   }
 
+  String _formatDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static const _monthlyHolidayQuota = 4;
+
+  // Quick-mark: double-tapping a calendar day opens this instead of
+  // requiring a trip back to Mark Attendance. Shows the same
+  // Present/Absent/Holiday choice, pre-filled with whatever is
+  // currently set for that day.
+  Future<void> _showQuickMarkDialog(int day) async {
+    final date = DateTime(_selectedMonth.year, _selectedMonth.month, day);
+    final dateStr = _formatDate(date);
+    final currentStatus = _statusByDay[day];
+
+    // Check how many holidays are already used this month, excluding
+    // this specific day - same rule as the main Mark Attendance screen.
+    final totalDays = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0).day;
+    final monthStart = _formatDate(DateTime(_selectedMonth.year, _selectedMonth.month, 1));
+    final monthEnd = _formatDate(DateTime(_selectedMonth.year, _selectedMonth.month, totalDays));
+    final monthRecords = await DatabaseHelper.instance.getAttendanceForEmployeeInRange(
+      widget.employee.id!,
+      monthStart,
+      monthEnd,
+    );
+    final holidaysUsedElsewhere =
+        monthRecords.where((r) => r.isHoliday && r.date != dateStr).length;
+    final holidayQuotaReached = holidaysUsedElsewhere >= _monthlyHolidayQuota;
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('${date.day}/${date.month}/${date.year}', style: const TextStyle(fontSize: 18)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(widget.employee.name, style: const TextStyle(fontSize: 15, color: Colors.grey)),
+              const SizedBox(height: 16),
+              _quickStatusButton(
+                label: 'Present',
+                color: Colors.green,
+                isSelected: currentStatus == 'present',
+                onTap: () => _quickSetStatus(dialogContext, dateStr, 'present'),
+              ),
+              const SizedBox(height: 8),
+              _quickStatusButton(
+                label: 'Absent',
+                color: Colors.red,
+                isSelected: currentStatus == 'absent',
+                onTap: () => _quickSetStatus(dialogContext, dateStr, 'absent'),
+              ),
+              const SizedBox(height: 8),
+              _quickStatusButton(
+                label: holidayQuotaReached && currentStatus != 'holiday'
+                    ? 'Holiday (quota used: $holidaysUsedElsewhere/$_monthlyHolidayQuota)'
+                    : 'Holiday',
+                color: Colors.blue,
+                isSelected: currentStatus == 'holiday',
+                onTap: (holidayQuotaReached && currentStatus != 'holiday')
+                    ? null
+                    : () => _quickSetStatus(dialogContext, dateStr, 'holiday'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _quickSetStatus(BuildContext dialogContext, String dateStr, String status) async {
+    await DatabaseHelper.instance.markAttendance(
+      Attendance(employeeId: widget.employee.id!, date: dateStr, status: status),
+    );
+    if (dialogContext.mounted) Navigator.pop(dialogContext);
+    _loadData(); // refresh calendar and salary summary immediately
+  }
+
+  Widget _quickStatusButton({
+    required String label,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback? onTap,
+  }) {
+    final isDisabled = onTap == null;
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected
+            ? color
+            : (isDisabled ? Colors.grey.shade100 : Colors.grey.shade200),
+        foregroundColor: isSelected
+            ? Colors.white
+            : (isDisabled ? Colors.grey.shade400 : Colors.black87),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 14)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final monthLabel = '${_monthNames[_selectedMonth.month - 1]} ${_selectedMonth.year}';
@@ -198,6 +307,11 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
                   _buildCalendar(),
                   const SizedBox(height: 12),
                   _buildLegend(),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Tip: double-tap any past day to quickly mark or fix attendance',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontStyle: FontStyle.italic),
+                  ),
                   const SizedBox(height: 20),
                   if (_result != null) _buildSummary(_result!),
                   if (_advances.isNotEmpty) ...[
@@ -319,48 +433,51 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
         textColor = Colors.black87;
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Text(
-            '$day',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textColor),
-          ),
-          if (hasAdvance || hasBonus)
-            Positioned(
-              bottom: 3,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (hasAdvance)
-                    Container(
-                      width: 6, height: 6,
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade800,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1),
-                      ),
-                    ),
-                  if (hasBonus)
-                    Container(
-                      width: 6, height: 6,
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.teal.shade800,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1),
-                      ),
-                    ),
-                ],
-              ),
+    return GestureDetector(
+      onDoubleTap: () => _showQuickMarkDialog(day),
+      child: Container(
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Text(
+              '$day',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textColor),
             ),
-        ],
+            if (hasAdvance || hasBonus)
+              Positioned(
+                bottom: 3,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (hasAdvance)
+                      Container(
+                        width: 6, height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade800,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1),
+                        ),
+                      ),
+                    if (hasBonus)
+                      Container(
+                        width: 6, height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.teal.shade800,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
