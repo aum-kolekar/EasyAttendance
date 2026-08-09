@@ -38,10 +38,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   void _changeMonth(int delta) {
-    setState(() {
-      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + delta, 1);
-    });
+    final next = DateTime(_selectedMonth.year, _selectedMonth.month + delta, 1);
+    final today = DateTime.now();
+    final currentMonthStart = DateTime(today.year, today.month, 1);
+    if (next.isAfter(currentMonthStart)) return;
+    setState(() => _selectedMonth = next);
     _loadResults();
+  }
+
+  bool get _isViewingCurrentMonth {
+    final today = DateTime.now();
+    return _selectedMonth.year == today.year && _selectedMonth.month == today.month;
   }
 
   @override
@@ -74,8 +81,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.chevron_right, size: 30),
-                  onPressed: () => _changeMonth(1),
+                  icon: Icon(
+                    Icons.chevron_right,
+                    size: 30,
+                    color: _isViewingCurrentMonth ? Colors.grey.shade300 : null,
+                  ),
+                  onPressed: _isViewingCurrentMonth ? null : () => _changeMonth(1),
                 ),
               ],
             ),
@@ -126,13 +137,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   ),
                                 ),
                               ),
-                              trailing: Text(
-                                '₹${r.payableSalary.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade700,
-                                ),
+                              trailing: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    '₹${r.payableSalary.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green.shade700,
+                                    ),
+                                  ),
+                                  if (r.isInProgress)
+                                    Text(
+                                      'so far',
+                                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                                    ),
+                                ],
                               ),
                               onTap: () {
                                 Navigator.push(

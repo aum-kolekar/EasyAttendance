@@ -4,21 +4,26 @@ import '../db/database_helper.dart';
 class SalaryResult {
   final Employee employee;
   final int totalDaysInMonth;
-  final int holidayQuota; // fixed monthly quota (4), for a fully employed month
-  final int holidayQuotaProrated; // quota actually earned this month, scaled by days employed
-  final int holidayDays; // actual holidays the employee took
-  final int workingDaysBasis; // totalDays - 4, used purely to derive perDayRate
-  final int employedDays; // days this month the employee was actually employed
+  final int holidayQuota;
+  final int holidayQuotaProrated;
+  final int holidayDays;
+  final int workingDaysBasis;
+  final int employedDays;
   final int preJoiningDays;
   final int absentDays;
   final int extraDaysWorked;
   final double perDayRate;
-  final double basePay; // perDayRate * (employedDays - holidayQuotaProrated)
+  final double basePay;
   final double deduction;
   final double advanceDeducted;
   final double manualBonusAdded;
   final double extraDayBonus;
   final double payableSalary;
+  // True if this month hasn't finished yet - payableSalary reflects
+  // only days elapsed so far, and extra-day bonus is withheld until
+  // the month actually completes.
+  final bool isInProgress;
+  final int presentDaysSoFar;
 
   SalaryResult({
     required this.employee,
@@ -38,6 +43,8 @@ class SalaryResult {
     required this.manualBonusAdded,
     required this.extraDayBonus,
     required this.payableSalary,
+    required this.isInProgress,
+    this.presentDaysSoFar = 0,
   });
 }
 
@@ -51,11 +58,9 @@ class SalaryCalculator {
     required int totalDays,
   }) {
     if (joiningDate == null) return 0;
-
     final joined = DateTime.parse(joiningDate);
     final monthStart = DateTime(year, month, 1);
     final monthEnd = DateTime(year, month, totalDays);
-
     if (!joined.isAfter(monthStart)) return 0;
     if (joined.isAfter(monthEnd)) return totalDays;
     return joined.day - 1;
@@ -67,6 +72,11 @@ class SalaryCalculator {
     required int month,
   }) async {
     final totalDays = DateTime(year, month + 1, 0).day;
+    final today = DateTime.now();
+    final isCurrentMonth = year == today.year && month == today.month;
+    final isFutureMonth =
+        DateTime(year, month, 1).isAfter(DateTime(today.year, today.month, 1));
+
     final startDate = '$year-${month.toString().padLeft(2, '0')}-01';
     final endDate =
         '$year-${month.toString().padLeft(2, '0')}-${totalDays.toString().padLeft(2, '0')}';
@@ -77,16 +87,6 @@ class SalaryCalculator {
       endDate,
     );
 
-    int absentDays = 0;
-    int holidayDays = 0;
-    for (final record in records) {
-      if (record.isAbsent) absentDays++;
-      if (record.isHoliday) holidayDays++;
-    }
-
-    // Per-day rate is always derived from a fully-employed month's
-    // structure (total days minus the standard 4-day quota) - this is
-    // a fixed rate, the same 26/27 days regardless of when someone joined.
     final workingDaysBasis = totalDays - monthlyHolidayQuota;
     final perDayRate =
         workingDaysBasis > 0 ? employee.monthlySalary / workingDaysBasis : 0.0;
@@ -97,22 +97,6 @@ class SalaryCalculator {
       month: month,
       totalDays: totalDays,
     );
-    final employedDays = totalDays - preJoiningDays;
-
-    // Holiday quota scaled to how much of the month was actually worked.
-    final holidayQuotaProrated = (monthlyHolidayQuota * employedDays) ~/ totalDays;
-
-    // The actual base pay owed: per-day rate times the days the employee
-    // was both employed AND expected to work (i.e. excluding their
-    // prorated holiday allowance). For a fully-employed month this comes
-    // out exactly equal to the monthly salary, as expected.
-    final basePay = perDayRate * (employedDays - holidayQuotaProrated);
-
-    final deduction = perDayRate * absentDays;
-
-    final extraDaysWorked =
-        (holidayQuotaProrated - holidayDays).clamp(0, holidayQuotaProrated);
-    final extraDayBonus = perDayRate * extraDaysWorked;
 
     final advances = await DatabaseHelper.instance.getAdvancesForEmployeeInRange(
       employee.id!,
@@ -127,6 +111,88 @@ class SalaryCalculator {
       endDate,
     );
     final bonusTotal = bonuses.fold<double>(0.0, (sum, b) => sum + b.amount);
+
+    if (isFutureMonth) {
+      // Nothing has happened yet - everything is zero.
+      return SalaryResult(
+        employee: employee,
+        totalDaysInMonth: totalDays,
+        holidayQuota: monthlyHolidayQuota,
+        holidayQuotaProrated: 0,
+        holidayDays: 0,
+        workingDaysBasis: workingDaysBasis,
+        employedDays: 0,
+        preJoiningDays: preJoiningDays,
+        absentDays: 0,
+        extraDaysWorked: 0,
+        perDayRate: perDayRate,
+        basePay: 0,
+        deduction: 0,
+        advanceDeducted: 0,
+        manualBonusAdded: 0,
+        extraDayBonus: 0,
+        payableSalary: 0,
+        isInProgress: true,
+      );
+    }
+
+    if (isCurrentMonth) {
+      // ACCRUAL MODEL: only count days that have actually happened and
+      // were actually marked - no assumptions about the rest of the
+      // month, and no extra-day bonus until the month finishes.
+      int presentDaysSoFar = 0;
+      int holidayDaysSoFar = 0;
+      int absentDaysSoFar = 0;
+
+      for (final record in records) {
+        final day = DateTime.parse(record.date).day;
+        if (day > today.day) continue; // safety - shouldn't happen
+        if (record.isPresent) presentDaysSoFar++;
+        if (record.isHoliday) holidayDaysSoFar++;
+        if (record.isAbsent) absentDaysSoFar++;
+      }
+
+      final basePay = perDayRate * (presentDaysSoFar + holidayDaysSoFar);
+      final payable = basePay - advanceTotal + bonusTotal;
+
+      return SalaryResult(
+        employee: employee,
+        totalDaysInMonth: totalDays,
+        holidayQuota: monthlyHolidayQuota,
+        holidayQuotaProrated: 0, // not finalized until month end
+        holidayDays: holidayDaysSoFar,
+        workingDaysBasis: workingDaysBasis,
+        employedDays: today.day - preJoiningDays.clamp(0, today.day),
+        preJoiningDays: preJoiningDays,
+        absentDays: absentDaysSoFar,
+        extraDaysWorked: 0,
+        perDayRate: perDayRate,
+        basePay: basePay,
+        deduction: 0,
+        advanceDeducted: advanceTotal,
+        manualBonusAdded: bonusTotal,
+        extraDayBonus: 0,
+        payableSalary: payable < 0 ? 0 : payable,
+        isInProgress: true,
+        presentDaysSoFar: presentDaysSoFar,
+      );
+    }
+
+    // COMPLETED PAST MONTH: full existing model.
+    int absentDays = 0;
+    int holidayDays = 0;
+    for (final record in records) {
+      if (record.isAbsent) absentDays++;
+      if (record.isHoliday) holidayDays++;
+    }
+
+    final employedDays = totalDays - preJoiningDays;
+    final holidayQuotaProrated = (monthlyHolidayQuota * employedDays) ~/ totalDays;
+    final basePay = perDayRate * (employedDays - holidayQuotaProrated);
+    final deduction = perDayRate * absentDays;
+    final extraDaysWorked =
+        (holidayQuotaProrated - holidayDays).clamp(0, holidayQuotaProrated);
+    final extraDayBonus = perDayRate * extraDaysWorked;
 
     final payable = basePay - deduction - advanceTotal + bonusTotal + extraDayBonus;
 
@@ -148,6 +214,7 @@ class SalaryCalculator {
       manualBonusAdded: bonusTotal,
       extraDayBonus: extraDayBonus,
       payableSalary: payable < 0 ? 0 : payable,
+      isInProgress: false,
     );
   }
 
@@ -158,11 +225,7 @@ class SalaryCalculator {
     final employees = await DatabaseHelper.instance.getAllEmployees();
     final results = <SalaryResult>[];
     for (final employee in employees) {
-      final result = await calculateForEmployee(
-        employee: employee,
-        year: year,
-        month: month,
-      );
+      final result = await calculateForEmployee(employee: employee, year: year, month: month);
       results.add(result);
     }
     return results;

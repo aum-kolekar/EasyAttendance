@@ -97,10 +97,18 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
   }
 
   void _changeMonth(int delta) {
-    setState(() {
-      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + delta, 1);
-    });
+    final next = DateTime(_selectedMonth.year, _selectedMonth.month + delta, 1);
+    final today = DateTime.now();
+    final currentMonthStart = DateTime(today.year, today.month, 1);
+    // Never allow navigating past the current month.
+    if (next.isAfter(currentMonthStart)) return;
+    setState(() => _selectedMonth = next);
     _loadData();
+  }
+
+  bool get _isViewingCurrentMonth {
+    final today = DateTime.now();
+    return _selectedMonth.year == today.year && _selectedMonth.month == today.month;
   }
 
   Future<void> _confirmDeleteAdvance(Advance a) async {
@@ -177,8 +185,12 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.chevron_right, size: 30),
-                        onPressed: () => _changeMonth(1),
+                        icon: Icon(
+                          Icons.chevron_right,
+                          size: 30,
+                          color: _isViewingCurrentMonth ? Colors.grey.shade300 : null,
+                        ),
+                        onPressed: _isViewingCurrentMonth ? null : () => _changeMonth(1),
                       ),
                     ],
                   ),
@@ -260,6 +272,27 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
   }
 
   Widget _dayCell(int day) {
+    final today = DateTime.now();
+    final cellDate = DateTime(_selectedMonth.year, _selectedMonth.month, day);
+    final isFuture = cellDate.isAfter(DateTime(today.year, today.month, today.day));
+
+    if (isFuture) {
+      // Future days: clearly inactive, no status possible yet.
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Center(
+          child: Text(
+            '$day',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey.shade400),
+          ),
+        ),
+      );
+    }
+
     final status = _statusByDay[day];
     final hasAdvance = _hasAdvanceByDay[day] == true;
     final hasBonus = _hasBonusByDay[day] == true;
@@ -268,20 +301,22 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
     Color textColor;
     switch (status) {
       case 'present':
-        bgColor = Colors.green.shade100;
-        textColor = Colors.green.shade900;
+        bgColor = Colors.green.shade400;
+        textColor = Colors.white;
         break;
       case 'absent':
-        bgColor = Colors.red.shade100;
-        textColor = Colors.red.shade900;
+        bgColor = Colors.red.shade400;
+        textColor = Colors.white;
         break;
       case 'holiday':
-        bgColor = Colors.blue.shade100;
-        textColor = Colors.blue.shade900;
+        bgColor = Colors.blue.shade400;
+        textColor = Colors.white;
         break;
       default:
-        bgColor = Colors.grey.shade100;
-        textColor = Colors.black54;
+        // Past/today with no record marked - neutral gray, distinct
+        // from both the status colors and the future-day style.
+        bgColor = Colors.grey.shade300;
+        textColor = Colors.black87;
     }
 
     return Container(
@@ -294,7 +329,7 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
         children: [
           Text(
             '$day',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textColor),
           ),
           if (hasAdvance || hasBonus)
             Positioned(
@@ -304,15 +339,23 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
                 children: [
                   if (hasAdvance)
                     Container(
-                      width: 5, height: 5,
+                      width: 6, height: 6,
                       margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade800,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1),
+                      ),
                     ),
                   if (hasBonus)
                     Container(
-                      width: 5, height: 5,
+                      width: 6, height: 6,
                       margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade800,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1),
+                      ),
                     ),
                 ],
               ),
@@ -327,11 +370,11 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
       spacing: 14,
       runSpacing: 6,
       children: [
-        _legendItem(Colors.green.shade100, 'Present'),
-        _legendItem(Colors.red.shade100, 'Absent'),
-        _legendItem(Colors.blue.shade100, 'Holiday'),
-        _legendDot(Colors.orange, 'Advance'),
-        _legendDot(Colors.green, 'Bonus'),
+        _legendItem(Colors.green.shade400, 'Present'),
+        _legendItem(Colors.red.shade400, 'Absent'),
+        _legendItem(Colors.blue.shade400, 'Holiday'),
+        _legendDot(Colors.orange.shade800, 'Advance'),
+        _legendDot(Colors.teal.shade800, 'Bonus'),
       ],
     );
   }
@@ -360,6 +403,56 @@ class _EmployeeReportDetailScreenState extends State<EmployeeReportDetailScreen>
 
   Widget _buildSummary(SalaryResult r) {
     final isMidMonthJoiner = r.preJoiningDays > 0;
+
+    if (r.isInProgress) {
+      // Simplified view for the current, still-running month.
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('Salary So Far', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Month in progress',
+                      style: TextStyle(fontSize: 11, color: Colors.blue.shade700, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Final totals (including any unused holiday bonus) are calculated once the month ends.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 10),
+              _row('Monthly Salary', '₹${r.employee.monthlySalary.toStringAsFixed(2)}'),
+              _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)} (basis: ${r.workingDaysBasis} days)'),
+              _row('Days Present So Far', '${r.presentDaysSoFar}'),
+              _row('Holidays Taken So Far', '${r.holidayDays}'),
+              _row('Days Absent So Far', '${r.absentDays}'),
+              if (r.advanceDeducted > 0)
+                _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}', color: Colors.orange),
+              if (r.manualBonusAdded > 0)
+                _row('Bonus Added', '+ ₹${r.manualBonusAdded.toStringAsFixed(2)}', color: Colors.green),
+              const Divider(height: 20),
+              _row('Payable So Far', '₹${r.payableSalary.toStringAsFixed(2)}',
+                  bold: true, color: Colors.green.shade700, fontSize: 18),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
