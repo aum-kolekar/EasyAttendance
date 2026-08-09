@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/salary_calculator.dart';
+import 'employee_report_detail_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -94,84 +95,60 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         itemCount: _results.length,
                         itemBuilder: (context, index) {
                           final r = _results[index];
-                          final isMidMonthJoiner = r.preJoiningDays > 0;
-
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 6),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    r.employee.name,
-                                    style: const TextStyle(
-                                      fontSize: 19,
-                                      fontWeight: FontWeight.w700,
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              leading: const CircleAvatar(
+                                radius: 24,
+                                child: Icon(Icons.person, size: 28),
+                              ),
+                              // Name takes about half the row; long names
+                              // fade out toward the right instead of
+                              // wrapping or overflowing.
+                              title: ShaderMask(
+                                shaderCallback: (bounds) => const LinearGradient(
+                                  colors: [Colors.black, Colors.black, Colors.transparent],
+                                  stops: [0.0, 0.85, 1.0],
+                                ).createShader(bounds),
+                                blendMode: BlendMode.dstIn,
+                                child: Text(
+                                  r.employee.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.clip,
+                                  softWrap: false,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              trailing: Text(
+                                '₹${r.payableSalary.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade700,
+                                ),
+                              ),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => EmployeeReportDetailScreen(
+                                      employee: r.employee,
+                                      initialMonth: _selectedMonth,
                                     ),
                                   ),
-                                  const SizedBox(height: 10),
-                                  _row('Monthly Salary', '₹${r.employee.monthlySalary.toStringAsFixed(2)}'),
-                                  _row('Per-Day Rate', '₹${r.perDayRate.toStringAsFixed(2)} (basis: ${r.workingDaysBasis} days)'),
-                                  if (isMidMonthJoiner)
-                                    _row('Days Employed This Month', '${r.employedDays} / ${r.totalDaysInMonth}'),
-                                  _row('Holiday Quota', isMidMonthJoiner
-                                      ? '${r.holidayQuotaProrated} (prorated)'
-                                      : '${r.holidayQuota}/month'),
-                                  _row('Holidays Taken', '${r.holidayDays}'),
-                                  _row('Base Pay', '₹${r.basePay.toStringAsFixed(2)}'),
-                                  _row('Days Absent', '${r.absentDays}'),
-                                  _row('Attendance Deduction', '- ₹${r.deduction.toStringAsFixed(2)}',
-                                      color: Colors.red),
-                                  if (r.advanceDeducted > 0)
-                                    _row('Advance Deducted', '- ₹${r.advanceDeducted.toStringAsFixed(2)}',
-                                        color: Colors.orange),
-                                  if (r.extraDaysWorked > 0)
-                                    _row('Extra Days Worked (unused holidays)', '${r.extraDaysWorked}'),
-                                  if (r.extraDayBonus > 0)
-                                    _row('Extra Day Bonus', '+ ₹${r.extraDayBonus.toStringAsFixed(2)}',
-                                        color: Colors.green),
-                                  if (r.manualBonusAdded > 0)
-                                    _row('Bonus Added', '+ ₹${r.manualBonusAdded.toStringAsFixed(2)}',
-                                        color: Colors.green),
-                                  const Divider(height: 20),
-                                  _row('Payable Salary', '₹${r.payableSalary.toStringAsFixed(2)}',
-                                      bold: true, color: Colors.green.shade700, fontSize: 18),
-                                ],
-                              ),
+                                );
+                              },
                             ),
                           );
                         },
                       ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Fixed to prevent the overflow error: label is Expanded (wraps/shrinks
-  // as needed) and value is Flexible with right-aligned text, so long
-  // strings never push past the edge of the card.
-  Widget _row(String label, String value, {bool bold = false, Color? color, double fontSize = 15}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(label, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: fontSize,
-                fontWeight: bold ? FontWeight.bold : FontWeight.w500,
-                color: color,
-              ),
-            ),
           ),
         ],
       ),
