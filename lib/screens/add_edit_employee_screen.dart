@@ -28,9 +28,6 @@ class _AddEditEmployeeScreenState extends State<AddEditEmployeeScreen> {
           ? widget.employee!.monthlySalary.toStringAsFixed(0)
           : '',
     );
-    // Pre-fill joining date if editing an employee that already has one.
-    // For a brand-new employee, default to today (most common case) -
-    // your father can change it if backdating an entry.
     if (widget.employee?.joiningDate != null) {
       _joiningDate = DateTime.parse(widget.employee!.joiningDate!);
     } else if (!_isEditing) {
@@ -89,30 +86,9 @@ class _AddEditEmployeeScreenState extends State<AddEditEmployeeScreen> {
     if (mounted) Navigator.pop(context);
   }
 
-  Future<void> _deleteEmployee() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Employee?'),
-        content: Text('Remove ${widget.employee!.name}? This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await DatabaseHelper.instance.deleteEmployee(widget.employee!.id!);
-      if (mounted) Navigator.pop(context);
-    }
-  }
+  // Note: deleting/archiving an employee is handled from the Employee
+  // Detail screen (Advance/Bonus/Edit) now, not here - keeps there
+  // being exactly one clear place to delete from.
 
   @override
   Widget build(BuildContext context) {
@@ -122,14 +98,6 @@ class _AddEditEmployeeScreenState extends State<AddEditEmployeeScreen> {
           _isEditing ? 'Edit Employee' : 'Add Employee',
           style: const TextStyle(fontSize: 20),
         ),
-        actions: [
-          if (_isEditing)
-            IconButton(
-              icon: const Icon(Icons.delete),
-              onPressed: _deleteEmployee,
-              tooltip: 'Delete Employee',
-            ),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),

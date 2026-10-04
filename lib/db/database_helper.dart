@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -35,7 +35,8 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         monthlySalary REAL NOT NULL,
-        joiningDate TEXT
+        joiningDate TEXT,
+        archivedAt TEXT
       )
     ''');
 
@@ -68,9 +69,6 @@ class DatabaseHelper {
       ''');
     }
     if (oldVersion < 3) {
-      // Add the new 'status' column and translate old true/false data
-      // into it. The old 'isPresent' column is left in place unused -
-      // harmless, and safer than trying to drop a column in SQLite.
       await db.execute("ALTER TABLE attendance ADD COLUMN status TEXT");
       await db.execute('''
         UPDATE attendance
@@ -80,9 +78,8 @@ class DatabaseHelper {
       await _createAdvancesTable(db);
     }
     if (oldVersion < 4) {
-      // Fix: the old 'isPresent' column is still NOT NULL, but our new
-      // code never sets it - every save was silently failing. Rebuild
-      // the table cleanly with only the columns we actually use now.
+      // Fix: the old 'isPresent' column was NOT NULL but new code never
+      // set it - rebuild the table cleanly with only current columns.
       await db.execute('''
         CREATE TABLE attendance_new(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,9 +102,12 @@ class DatabaseHelper {
       await _createBonusesTable(db);
     }
     if (oldVersion < 6) {
-      // Nullable column - existing employees simply have no joining date
-      // set, meaning "no pre-joining deduction applies" (unaffected).
       await db.execute("ALTER TABLE employees ADD COLUMN joiningDate TEXT");
+    }
+    if (oldVersion < 7) {
+      // Soft-delete support: null = active employee, a timestamp means
+      // archived. Existing employees are unaffected (stay active).
+      await db.execute("ALTER TABLE employees ADD COLUMN archivedAt TEXT");
     }
   }
 
@@ -137,16 +137,32 @@ class DatabaseHelper {
     ''');
   }
 
-  // --- Employee CRUD (unchanged) ---
+  // --- Employee CRUD ---
 
   Future<int> insertEmployee(Employee employee) async {
     final db = await database;
     return await db.insert('employees', employee.toMap()..remove('id'));
   }
 
+  // Only ACTIVE (non-archived) employees - this is what the main
+  // Employee list and current-month Reports use.
   Future<List<Employee>> getAllEmployees() async {
     final db = await database;
-    final maps = await db.query('employees', orderBy: 'name ASC');
+    final maps = await db.query(
+      'employees',
+      where: 'archivedAt IS NULL',
+      orderBy: 'name ASC',
+    );
+    return maps.map((map) => Employee.fromMap(map)).toList();
+  }
+
+  Future<List<Employee>> getArchivedEmployees() async {
+    final db = await database;
+    final maps = await db.query(
+      'employees',
+      where: 'archivedAt IS NOT NULL',
+      orderBy: 'archivedAt DESC',
+    );
     return maps.map((map) => Employee.fromMap(map)).toList();
   }
 
@@ -167,12 +183,37 @@ class DatabaseHelper {
     );
   }
 
+  // Soft delete - hides from active list, keeps all historical data.
+  Future<void> archiveEmployee(int id) async {
+    final db = await database;
+    await db.update(
+      'employees',
+      {'archivedAt': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Un-hide - brings an archived employee back to the active list.
+  Future<void> restoreEmployee(int id) async {
+    final db = await database;
+    await db.update(
+      'employees',
+      {'archivedAt': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Permanent delete - used only from the Archives "bin" flow, after
+  // the multi-step confirmation. Cascades to attendance/advances/bonuses
+  // automatically via the foreign key ON DELETE CASCADE constraints.
   Future<int> deleteEmployee(int id) async {
     final db = await database;
     return await db.delete('employees', where: 'id = ?', whereArgs: [id]);
   }
 
-  // --- Attendance (status-based: present / absent / holiday) ---
+  // --- Attendance ---
 
   Future<void> markAttendance(Attendance attendance) async {
     final db = await database;
@@ -184,6 +225,15 @@ class DatabaseHelper {
         'status': attendance.status,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteAttendanceForDate(int employeeId, String date) async {
+    final db = await database;
+    await db.delete(
+      'attendance',
+      where: 'employeeId = ? AND date = ?',
+      whereArgs: [employeeId, date],
     );
   }
 

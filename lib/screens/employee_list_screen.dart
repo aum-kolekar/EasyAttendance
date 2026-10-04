@@ -3,6 +3,7 @@ import '../db/database_helper.dart';
 import '../models/employee.dart';
 import 'add_edit_employee_screen.dart';
 import 'employee_detail_screen.dart';
+import 'archives_screen.dart';
 
 class EmployeeListScreen extends StatefulWidget {
   const EmployeeListScreen({super.key});
@@ -35,6 +36,19 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Employees', style: TextStyle(fontSize: 22)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.archive_outlined),
+            tooltip: 'Archives',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ArchivesScreen()),
+              );
+              _loadEmployees(); // refresh in case someone was restored
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -74,8 +88,6 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                           style: const TextStyle(fontSize: 15),
                         ),
                         trailing: const Icon(Icons.chevron_right),
-                        // Tapping an employee now opens a detail screen with
-                        // three clear options: Advance, Bonus, Edit.
                         onTap: () async {
                           await Navigator.push(
                             context,
@@ -83,7 +95,7 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
                               builder: (_) => EmployeeDetailScreen(employee: employee),
                             ),
                           );
-                          _loadEmployees(); // refresh in case salary was edited
+                          _loadEmployees();
                         },
                       ),
                     );

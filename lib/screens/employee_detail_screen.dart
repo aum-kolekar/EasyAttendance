@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../db/database_helper.dart';
 import '../models/employee.dart';
 import '../widgets/add_advance_dialog.dart';
 import 'add_edit_employee_screen.dart';
@@ -8,11 +9,75 @@ class EmployeeDetailScreen extends StatelessWidget {
 
   const EmployeeDetailScreen({super.key, required this.employee});
 
+  // Archives the employee (soft delete) after a simple Yes/No
+  // confirmation. All their attendance/advance/bonus history stays
+  // intact - they just move to Archives, where they can be restored
+  // or, if truly needed, permanently deleted later.
+  Future<void> _deleteEmployee(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Employee?'),
+        content: Text('Are you sure you want to delete ${employee.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await DatabaseHelper.instance.archiveEmployee(employee.id!);
+      if (context.mounted) {
+        // A dialog with an explicit OK button (instead of a snackbar)
+        // makes sure this is actually read, not just glimpsed and
+        // swiped away.
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.archive_outlined, color: Colors.grey.shade700, size: 22),
+                const SizedBox(width: 8),
+                const Text('Employee Deleted'),
+              ],
+            ),
+            content: Text(
+              '${employee.name} has been deleted. You can still access '
+              'them from Archives for future reference.',
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        if (context.mounted) Navigator.pop(context);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(employee.name, style: const TextStyle(fontSize: 20)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Delete Employee',
+            onPressed: () => _deleteEmployee(context),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
